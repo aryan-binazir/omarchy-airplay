@@ -1,0 +1,22 @@
+{
+  "title": "AirPlay",
+  "status.checking": "Checking…",
+  "status.notInstalled": "doubletake not installed",
+  "status.mirroringTo": "Mirroring to %1",
+  "status.connecting": "Connecting…",
+  "status.ready": "Not mirroring",
+  "tooltip.idle": "AirPlay mirroring",
+  "tooltip.mirroring": "Mirroring to %1",
+  "section.receivers": "Receivers",
+  "row.mirroring": "Mirroring",
+  "row.connecting": "Connecting…",
+  "row.waiting": "Needs code",
+  "prompt.pin": "Enter the code shown on %1",
+  "prompt.password": "Enter the AirPlay password for %1",
+  "prompt.pinPlaceholder": "4-digit code",
+  "prompt.passwordPlaceholder": "Password",
+  "help.install": "This widget needs doubletake. Install the doubletake-bin package from the AUR, then open this panel again.",
+  "help.starting": "Starting…",
+  "help.searching": "Looking for AirPlay receivers…",
+  "error.generic": "That did not work. Try again."
+}

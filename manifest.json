@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "aryan-binazir.airplay",
+  "name": "AirPlay",
+  "version": "0.1.0",
+  "author": "Aryan Binazir",
+  "license": "MIT",
+  "description": "Mirror your desktop to an Apple TV or other AirPlay receiver from the bar. Needs doubletake.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "AirPlay",
+    "description": "Pick an AirPlay receiver to mirror your desktop to",
+    "category": "Media",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "portRange": "60000-60010"
+    },
+    "schema": [
+      {
+        "key": "portRange",
+        "type": "string",
+        "label": "Local ports the receiver connects back to (allow these through your firewall)",
+        "defaultValue": "60000-60010"
+      }
+    ]
+  }
+}
