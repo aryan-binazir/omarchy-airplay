@@ -1,5 +1,6 @@
 const test = require("node:test")
 const assert = require("node:assert/strict")
+const fs = require("node:fs")
 const { sandbox, waitFor, sleep } = require("./harness.js")
 
 const SPEAKERS = { index: 1, name: "speakers" }
@@ -12,6 +13,8 @@ const mirrorTo = (extra = {}) => ({ streams: [{ device: "TV", device_ip: "10.0.0
 const sinkOf = (box, input) => box.sound().inputs.find((entry) => entry.index === input).sink
 const routedTo = (box, name) => () => box.sound().default === name
 const stopped = (box) => () => !box.alive("unit.pid") && !box.alive("doubletake.pid")
+// How often a process has gone to sleep and been woken since it started.
+const wakeups = (pid) => Number(fs.readFileSync("/proc/" + pid + "/status", "utf8").match(/^voluntary_ctxt_switches:\s+(\d+)/m)[1])
 
 function start(t, env = {}) {
   const box = sandbox(t)
@@ -138,6 +141,49 @@ test("the service keeps running while a receiver is being mirrored to", async (t
   const box = start(t)
   box.setDaemon(mirrorTo({ state: "pin_required", has_audio: false }))
   await sleep(1200)
+  assert.equal(box.alive("unit.pid"), true)
+  assert.equal(box.ctl(["status"]).json.daemon, true)
+})
+
+test("the service sleeps between checks instead of polling", async (t) => {
+  const box = start(t, { OMARCHY_AIRPLAY_TICK: "1", OMARCHY_AIRPLAY_IDLE: "60" })
+  const unit = box.pid("unit.pid")
+  await sleep(500)
+  const before = wakeups(unit)
+  await sleep(3000)
+  // Three checks of a socket round trip each; a polling wait wakes about twenty times a second.
+  assert.ok(wakeups(unit) - before < 20, "woke " + (wakeups(unit) - before) + " times in 3 s")
+})
+
+test("while sound stays on the TV, each check asks the sound server one question", async (t) => {
+  const box = await mirroringWithSound(t)
+  await sleep(200)
+  const checksBefore = box.calls("requests").length
+  const askedBefore = box.calls("pactl").length
+  await sleep(600)
+  const checks = box.calls("requests").length - checksBefore
+  const asked = box.calls("pactl").length - askedBefore
+  assert.ok(checks >= 5, "the service kept checking")
+  assert.ok(asked >= 1 && asked <= checks + 1, asked + " sound server calls for " + checks + " checks")
+})
+
+test("once the last panel has closed, the service stops as soon as mirroring ends", async (t) => {
+  const box = start(t, { OMARCHY_AIRPLAY_IDLE: "60" })
+  box.setDaemon(mirrorTo({ has_audio: false }))
+  assert.deepEqual(box.ctl(["down"]).json, { ok: true })
+  await sleep(300)
+  assert.equal(box.alive("unit.pid"), true)
+  box.setDaemon({ streams: [] })
+  await waitFor(stopped(box), "the service to stop")
+})
+
+test("opening a panel again keeps the service up after mirroring ends", async (t) => {
+  const box = start(t, { OMARCHY_AIRPLAY_IDLE: "60" })
+  box.setDaemon(mirrorTo({ has_audio: false }))
+  assert.deepEqual(box.ctl(["down"]).json, { ok: true })
+  assert.deepEqual(box.ctl(["up"]).json, { ok: true })
+  box.setDaemon({ streams: [] })
+  await sleep(500)
   assert.equal(box.alive("unit.pid"), true)
   assert.equal(box.ctl(["status"]).json.daemon, true)
 })

@@ -56,6 +56,11 @@ def socket_path():
     return os.path.join(runtime_dir(), "daemon.sock")
 
 
+def stop_request_path():
+    """Present while no panel is open but a mirror kept the daemon up."""
+    return os.path.join(runtime_dir(), "stop-when-idle")
+
+
 def ensure_runtime_dir():
     os.makedirs(runtime_dir(), mode=0o700, exist_ok=True)
 
@@ -188,6 +193,9 @@ def command_up(args):
         return fail("doubletake is not installed")
 
     with lock():
+        # A panel is open again: the daemon stays up for it.
+        with contextlib.suppress(OSError):
+            os.unlink(stop_request_path())
         if ask({"cmd": "status"}) is not None:
             return OK
         if systemctl("is-active", "--quiet", STOCK_UNIT) == 0:
@@ -220,7 +228,9 @@ def command_down(_args):
     with lock():
         status = ask({"cmd": "status"})
         if status is not None and streams_of(status):
-            return fail("still mirroring")
+            # The mirror stays; the supervisor stops the daemon once it ends.
+            open(stop_request_path(), "w").close()
+            return OK
         systemctl("stop", UNIT)
         return OK
 
@@ -418,6 +428,10 @@ def settle_audio(mirroring=False):
         state = load_audio_state()
         if state is None:
             return True
+        # The steady state while mirroring: sound is still on the TV. One
+        # question settles it, so each check starts one pactl rather than two.
+        if mirroring and (pactl("get-default-sink") or "").strip() == state["mirror"]:
+            return True
         outputs = sound_outputs()
         if outputs is None:
             return False
@@ -476,11 +490,11 @@ def command_supervise(args):
         last_mirror = time.monotonic()
         handled = False
         while True:
-            try:
-                daemon.wait(timeout=tick)
+            # A timed wait polls the child every few milliseconds; a plain sleep
+            # wakes once per tick.
+            time.sleep(tick)
+            if daemon.poll() is not None:
                 break
-            except subprocess.TimeoutExpired:
-                pass
 
             status = ask({"cmd": "status"})
             # An unanswered query says nothing about the streams: sound stays
@@ -497,20 +511,44 @@ def command_supervise(args):
                 else:
                     handled = False
                     settle_audio()
+                if not streams and stopped_on_request(daemon):
+                    break
             if time.monotonic() - last_mirror > idle_limit:
                 break
     finally:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         settle_audio()
-        if daemon is not None and daemon.poll() is None:
-            daemon.terminate()
-            try:
-                daemon.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                daemon.kill()
-                daemon.wait()
+        if daemon is not None:
+            end_daemon(daemon)
     return OK
+
+
+def end_daemon(daemon):
+    if daemon.poll() is None:
+        daemon.terminate()
+        try:
+            daemon.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            daemon.kill()
+            daemon.wait()
+
+
+def stopped_on_request(daemon):
+    """Stop the daemon if `down` asked for it and nothing is mirrored any more.
+
+    Decided and done under the lock, so a panel opening at the same moment
+    either cancels the request first or finds the daemon already gone."""
+    if not os.path.exists(stop_request_path()):
+        return False
+    with lock():
+        status = ask({"cmd": "status"})
+        if not os.path.exists(stop_request_path()) or status is None or streams_of(status):
+            return False
+        with contextlib.suppress(OSError):
+            os.unlink(stop_request_path())
+        end_daemon(daemon)
+        return True
 
 
 COMMANDS = {

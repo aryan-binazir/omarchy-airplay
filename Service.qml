@@ -109,9 +109,8 @@ Item {
 
   function unwatch() {
     watchers = Math.max(0, watchers - 1)
-    // The helper refuses to stop a daemon that is mirroring; this only spares
-    // the pointless attempt.
-    if (watchers === 0 && !mirroring && !pending) enqueue(["down"], "", true)
+    // The helper stops the daemon now, or once mirroring ends.
+    if (watchers === 0) enqueue(["down"], "", true)
   }
 
   function connectTo(ip, ports) {
