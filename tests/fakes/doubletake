@@ -1,0 +1,97 @@
+#!/usr/bin/python3 -I
+"""Test stand-in for the doubletake daemon: serves canned state on the control socket."""
+import json
+import os
+import signal
+import socket
+import sys
+
+LOG = os.environ["FAKE_LOG"]
+STATE = os.environ["FAKE_DAEMON_STATE"]
+
+
+def load():
+    try:
+        with open(STATE) as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return {}
+
+
+def save(state):
+    with open(STATE + ".tmp", "w") as handle:
+        json.dump(state, handle)
+    os.replace(STATE + ".tmp", STATE)
+
+
+def respond(request):
+    state = load()
+    streams = state.setdefault("streams", [])
+    command = request.get("cmd")
+    target = request.get("target", "")
+    if command == "status":
+        return {"ok": True, "state": state.get("state", "idle"), "error": state.get("error", ""), "streams": streams}
+    if command == "devices":
+        return {"ok": True, "state": "idle", "devices": state.get("devices", [])}
+    if command == "connect":
+        existing = [stream for stream in streams if stream["device_ip"] == target]
+        if request.get("pin"):
+            if not existing or existing[0]["state"] != "pin_required":
+                return {"ok": False, "error": "credential prompt is not ready for " + target}
+            existing[0]["state"] = "streaming"
+            existing[0].pop("credential_kind", None)
+        elif existing:
+            return {"ok": False, "error": "already connected or connecting to " + target}
+        else:
+            streams.append({"device": "Receiver " + target, "device_ip": target, "state": "streaming", "has_audio": True})
+        save(state)
+        return {"ok": True, "state": "connecting"}
+    if command == "disconnect":
+        state["streams"] = [stream for stream in streams if target and stream["device_ip"] != target]
+        save(state)
+        return {"ok": True, "state": "idle"}
+    return {"ok": False, "error": "unknown command: " + str(command)}
+
+
+def main():
+    args = sys.argv[1:]
+    with open(os.path.join(LOG, "doubletake.argv"), "w") as handle:
+        json.dump(args, handle)
+    with open(os.path.join(LOG, "doubletake.pid"), "w") as handle:
+        handle.write(str(os.getpid()))
+    path = args[args.index("-socket") + 1]
+
+    def stop(*_):
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, stop)
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(path)
+    server.listen(8)
+    try:
+        while True:
+            connection, _ = server.accept()
+            with connection:
+                data = b""
+                while b"\n" not in data:
+                    chunk = connection.recv(65536)
+                    if not chunk:
+                        break
+                    data += chunk
+                try:
+                    request = json.loads(data)
+                except ValueError:
+                    continue
+                with open(os.path.join(LOG, "requests.jsonl"), "a") as handle:
+                    handle.write(json.dumps(request) + "\n")
+                connection.sendall(json.dumps(respond(request)).encode() + b"\n")
+    finally:
+        server.close()
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+if __name__ == "__main__":
+    main()

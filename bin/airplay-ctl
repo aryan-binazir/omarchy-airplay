@@ -1,0 +1,537 @@
+#!/usr/bin/python3 -I
+"""Backend for the Omarchy AirPlay widget.
+
+The only part of the plugin that touches doubletake, systemd or the sound
+server. Every command prints one JSON object. `status` is read-only; the
+daemon's lifetime and the audio route belong to `supervise`, which runs in a
+transient systemd user unit so it outlives a shell restart.
+"""
+import contextlib
+import fcntl
+import ipaddress
+import json
+import os
+import re
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import time
+
+UNIT = "omarchy-airplay.service"
+STOCK_UNIT = "doubletake.service"
+DEFAULT_PORT_RANGE = "60000-60010"
+SELF = os.path.abspath(__file__)
+
+MAX_REPLY = 1 << 20
+MAX_ENTRIES = 64
+MAX_NAME = 160
+MAX_ERROR = 500
+MAX_CREDENTIAL = 128
+SOCKET_TIMEOUT = 3.0
+
+OK = {"ok": True}
+
+
+def fail(message):
+    return {"ok": False, "error": str(message)[:500]}
+
+
+def seconds(name, default):
+    """A duration the tests may shorten through the environment."""
+    try:
+        value = float(os.environ.get(name, ""))
+    except ValueError:
+        return default
+    return value if 0 < value <= 3600 else default
+
+
+def runtime_dir():
+    base = os.environ.get("XDG_RUNTIME_DIR") or "/run/user/%d" % os.getuid()
+    return os.path.join(base, "omarchy-airplay")
+
+
+def socket_path():
+    return os.path.join(runtime_dir(), "daemon.sock")
+
+
+def ensure_runtime_dir():
+    os.makedirs(runtime_dir(), mode=0o700, exist_ok=True)
+
+
+@contextlib.contextmanager
+def lock():
+    """One state-changing command at a time, so `down` cannot race `connect`."""
+    ensure_runtime_dir()
+    with open(os.path.join(runtime_dir(), "lock"), "w") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
+
+
+def ask(request):
+    """Send one request to the daemon. None means it could not be reached."""
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(SOCKET_TIMEOUT)
+            client.connect(socket_path())
+            client.sendall(json.dumps(request).encode() + b"\n")
+            data = b""
+            while b"\n" not in data and len(data) <= MAX_REPLY:
+                chunk = client.recv(65536)
+                if not chunk:
+                    break
+                data += chunk
+        reply = json.loads(data[:MAX_REPLY])
+    except (OSError, ValueError):
+        return None
+    return reply if isinstance(reply, dict) else None
+
+
+def answered(reply):
+    if reply is None:
+        return fail("the AirPlay service did not answer")
+    if reply.get("ok") is True:
+        return OK
+    return fail(reply.get("error") or "doubletake refused the request")
+
+
+def entries(value):
+    return value[:MAX_ENTRIES] if isinstance(value, list) else []
+
+
+def streams_of(status):
+    return [stream for stream in entries(status.get("streams")) if isinstance(stream, dict)]
+
+
+def port_range(text):
+    """LOW-HIGH among unprivileged ports, with the three doubletake needs."""
+    match = re.fullmatch(r"([0-9]{1,5})-([0-9]{1,5})", text)
+    if not match:
+        return None
+    low, high = int(match[1]), int(match[2])
+    if low < 1024 or high > 65535 or high - low < 2:
+        return None
+    return "%d-%d" % (low, high)
+
+
+def receiver(text):
+    """Only an address literal names a receiver: no hostnames, zones or options."""
+    if not re.fullmatch(r"[0-9A-Fa-f:.]{2,45}", text):
+        return None
+    try:
+        ipaddress.ip_address(text)
+    except ValueError:
+        return None
+    return text
+
+
+def systemctl(*args):
+    try:
+        return subprocess.run(["systemctl", "--user", *args], stdin=subprocess.DEVNULL,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20).returncode
+    except (OSError, subprocess.TimeoutExpired):
+        return -1
+
+
+def unit_value(text):
+    """Quote one word of a systemd command line."""
+    escaped = text.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%").replace("$", "$$")
+    return '"%s"' % escaped
+
+
+def text(value, limit):
+    return value[:limit] if isinstance(value, str) else ""
+
+
+def read_status():
+    """The daemon's state, cut down to the fields the widget shows.
+
+    Receiver names come off the network, so everything is bounded here before
+    the shell collects it."""
+    if shutil.which("doubletake") is None:
+        return {"installed": False, "daemon": False}
+    status = ask({"cmd": "status"})
+    if status is None:
+        return {"installed": True, "daemon": False}
+    found = ask({"cmd": "devices"}) or {}
+    devices = [
+        {"name": text(device.get("name"), MAX_NAME), "model": text(device.get("model"), MAX_NAME),
+         "ip": text(device.get("ip"), 45)}
+        for device in entries(found.get("devices")) if isinstance(device, dict)
+    ]
+    streams = [
+        {"device": text(stream.get("device"), MAX_NAME), "device_ip": text(stream.get("device_ip"), 45),
+         "state": text(stream.get("state"), 32), "credential_kind": text(stream.get("credential_kind"), 16),
+         "has_audio": stream.get("has_audio") is True}
+        for stream in streams_of(status)
+    ]
+    return {
+        "installed": True,
+        "daemon": True,
+        "state": text(status.get("state"), 32) or "idle",
+        "error": text(status.get("error"), MAX_ERROR),
+        "devices": devices,
+        "streams": streams,
+    }
+
+
+def command_status(_args):
+    return read_status()
+
+
+def command_up(args):
+    ports = port_range(args[0] if args else DEFAULT_PORT_RANGE)
+    if ports is None or len(args) > 1:
+        return fail("the port range must look like 60000-60010, with at least three unprivileged ports")
+    if shutil.which("doubletake") is None:
+        return fail("doubletake is not installed")
+
+    with lock():
+        if ask({"cmd": "status"}) is not None:
+            return OK
+        if systemctl("is-active", "--quiet", STOCK_UNIT) == 0:
+            return fail("doubletake.service is already running; stop it to mirror from the bar")
+        if systemctl("is-active", "--quiet", UNIT) == 0:
+            systemctl("stop", UNIT)
+
+        try:
+            started = subprocess.run(
+                ["systemd-run", "--user", "--collect", "--quiet", "--unit=" + UNIT,
+                 "--description=AirPlay mirroring for the Omarchy bar",
+                 "--property=TimeoutStopSec=10",
+                 "--property=ExecStopPost=%s restore-audio" % unit_value(SELF),
+                 "--", SELF, "supervise", ports],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=15)
+        except (OSError, subprocess.TimeoutExpired):
+            return fail("could not start the AirPlay service")
+        if started.returncode != 0:
+            return fail(started.stderr.decode(errors="replace").strip() or "could not start the AirPlay service")
+
+        deadline = time.monotonic() + seconds("OMARCHY_AIRPLAY_READY", 10.0)
+        while time.monotonic() < deadline:
+            if ask({"cmd": "status"}) is not None:
+                return OK
+            time.sleep(0.1)
+        return fail("the AirPlay service did not start")
+
+
+def command_down(_args):
+    with lock():
+        status = ask({"cmd": "status"})
+        if status is not None and streams_of(status):
+            return fail("still mirroring")
+        systemctl("stop", UNIT)
+        return OK
+
+
+def read_credential():
+    """One line from stdin, so a code never appears in a process's arguments.
+
+    Only the line is read: the shell keeps stdin open after writing it."""
+    try:
+        raw = sys.stdin.buffer.readline(4 * MAX_CREDENTIAL + 2)
+        text = raw.decode()
+    except (OSError, ValueError):
+        return None
+    if not text.endswith("\n") and len(raw) >= 4 * MAX_CREDENTIAL + 2:
+        return None
+    if text.endswith("\n"):
+        text = text[:-1]
+    if not 0 < len(text) <= MAX_CREDENTIAL or any(ord(char) < 32 or ord(char) == 127 for char in text):
+        return None
+    return text
+
+
+def command_connect(args):
+    if not args or args[1:] not in ([], ["--credential-stdin"]):
+        return fail("usage: airplay-ctl connect <address> [--credential-stdin]")
+    address = receiver(args[0])
+    if address is None:
+        return fail("a receiver is named by its IP address")
+    credential = None
+    if len(args) == 2:
+        credential = read_credential()
+        if credential is None:
+            return fail("that code cannot be used")
+
+    with lock():
+        status = ask({"cmd": "status"})
+        if status is None:
+            return fail("the AirPlay service is not running")
+        streams = streams_of(status)
+        current = next((stream for stream in streams if stream.get("device_ip") == address), None)
+
+        if credential is not None:
+            if current is None or current.get("state") != "pin_required":
+                return fail("that receiver is not waiting for a code")
+            return answered(ask({"cmd": "connect", "target": address, "pin": credential}))
+
+        if current is not None:
+            return OK
+        # One receiver at a time: picking another moves the mirror to it.
+        for stream in streams:
+            other = stream.get("device_ip")
+            if isinstance(other, str) and other:
+                ask({"cmd": "disconnect", "target": other})
+        return answered(ask({"cmd": "connect", "target": address}))
+
+
+def command_disconnect(args):
+    if len(args) > 1:
+        return fail("usage: airplay-ctl disconnect [address]")
+    address = None
+    if args:
+        address = receiver(args[0])
+        if address is None:
+            return fail("a receiver is named by its IP address")
+
+    with lock():
+        status = ask({"cmd": "status"})
+        if status is None:
+            return OK
+        if address is None:
+            return answered(ask({"cmd": "disconnect"}))
+        if not any(stream.get("device_ip") == address for stream in streams_of(status)):
+            return OK
+        return answered(ask({"cmd": "disconnect", "target": address}))
+
+
+def pactl(*args):
+    """Run pactl. Returns its output, or None when it failed."""
+    try:
+        done = subprocess.run(["pactl", *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL, timeout=3, env={**os.environ, "LC_ALL": "C"})
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return done.stdout.decode(errors="replace") if done.returncode == 0 else None
+
+
+def pactl_list(kind):
+    text = pactl("-f", "json", "list", kind)
+    try:
+        listed = json.loads(text) if text is not None else None
+    except ValueError:
+        return None
+    if not isinstance(listed, list):
+        return None
+    return [entry for entry in listed if isinstance(entry, dict)]
+
+
+def sound_outputs():
+    """(sink index by name, default sink name), or None when the sound server cannot say."""
+    sinks = pactl_list("sinks")
+    default = pactl("get-default-sink")
+    if sinks is None or default is None:
+        return None
+    by_name = {sink["name"]: sink.get("index") for sink in sinks if isinstance(sink.get("name"), str)}
+    return by_name, default.strip()
+
+
+def application_inputs():
+    """Playback streams of real applications. A filter chain's own output is a
+    sink input too, but has no application name; moving it would rewire the
+    processing itself. EasyEffects stays put for the same reason."""
+    found = []
+    for entry in pactl_list("sink-inputs") or []:
+        properties = entry.get("properties")
+        name = properties.get("application.name") if isinstance(properties, dict) else None
+        if isinstance(entry.get("index"), int) and name and name != "EasyEffects":
+            found.append(entry)
+    return found
+
+
+def audio_state_path():
+    return os.path.join(runtime_dir(), "audio.json")
+
+
+@contextlib.contextmanager
+def audio_lock():
+    ensure_runtime_dir()
+    with open(os.path.join(runtime_dir(), "audio.lock"), "w") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
+
+
+def load_audio_state():
+    """What was saved before sound was sent to the TV, or None."""
+    try:
+        with open(audio_state_path()) as handle:
+            state = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(state, dict):
+        return None
+    previous, mirror, moved = state.get("previous"), state.get("mirror"), state.get("moved")
+    if not isinstance(previous, str) or not isinstance(mirror, str) or not isinstance(moved, list):
+        return None
+    return {"previous": previous, "mirror": mirror, "moved": [index for index in moved if isinstance(index, int)]}
+
+
+def save_audio_state(state):
+    temporary = audio_state_path() + ".tmp"
+    with open(temporary, "w") as handle:
+        json.dump(state, handle)
+    os.replace(temporary, audio_state_path())
+
+
+def forget_audio_state():
+    with contextlib.suppress(OSError):
+        os.unlink(audio_state_path())
+
+
+def engage_audio():
+    """Send sound to the TV. True once there is nothing more to do for this mirror."""
+    with audio_lock():
+        if load_audio_state() is not None:
+            return True
+        outputs = sound_outputs()
+        if outputs is None:
+            return False
+        by_name, default = outputs
+        mirrors = [name for name in by_name if re.fullmatch(r"doubletake(_[0-9a-f]{16})?", name)]
+        # doubletake creates its output a moment after the stream starts, and a
+        # second doubletake would add another. Only an unambiguous one is used.
+        if len(mirrors) != 1:
+            return False
+        mirror = mirrors[0]
+        if default == mirror or default not in by_name:
+            return True
+
+        inputs = [entry["index"] for entry in application_inputs()]
+        # Saved before anything changes, so an interrupted switch can be undone.
+        save_audio_state({"previous": default, "mirror": mirror, "moved": inputs})
+        if pactl("set-default-sink", mirror) is None:
+            forget_audio_state()
+            return False
+        for index in inputs:
+            pactl("move-sink-input", str(index), mirror)
+        return True
+
+
+def settle_audio(mirroring=False):
+    """Put sound back where it was. False when that failed and should be retried.
+
+    While still mirroring this only acts once sound has left the TV by itself:
+    an output picked by hand is kept, and a vanished TV output is recovered."""
+    with audio_lock():
+        state = load_audio_state()
+        if state is None:
+            return True
+        outputs = sound_outputs()
+        if outputs is None:
+            return False
+        by_name, default = outputs
+        mirror_present = state["mirror"] in by_name
+        if mirror_present and default == state["mirror"] and mirroring:
+            return True
+        if mirror_present and default != state["mirror"]:
+            forget_audio_state()
+            return True
+        if state["previous"] not in by_name:
+            forget_audio_state()
+            return True
+        if pactl("set-default-sink", state["previous"]) is None:
+            return False
+        mirror_index = by_name.get(state["mirror"])
+        for entry in application_inputs():
+            if entry["index"] in state["moved"] or (mirror_index is not None and entry.get("sink") == mirror_index):
+                pactl("move-sink-input", str(entry["index"]), state["previous"])
+        forget_audio_state()
+        return True
+
+
+def command_restore_audio(_args):
+    return OK if settle_audio() else fail("could not restore the previous audio output")
+
+
+def command_supervise(args):
+    """Own the daemon and the audio route for as long as the unit runs."""
+    ports = port_range(args[0] if args else DEFAULT_PORT_RANGE)
+    if ports is None:
+        return fail("invalid port range")
+    ensure_runtime_dir()
+    os.chmod(runtime_dir(), 0o700)
+    if ask({"cmd": "status"}) is not None:
+        return fail("the AirPlay service is already running")
+    with contextlib.suppress(OSError):
+        os.unlink(socket_path())
+    settle_audio()
+
+    def stop(*_):
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    daemon = None
+    try:
+        try:
+            daemon = subprocess.Popen(["doubletake", "-daemonize", "-socket", socket_path(), "-port-range", ports],
+                                      stdin=subprocess.DEVNULL)
+        except OSError:
+            return fail("doubletake is not installed")
+
+        tick = seconds("OMARCHY_AIRPLAY_TICK", 1.0)
+        idle_limit = seconds("OMARCHY_AIRPLAY_IDLE", 300.0)
+        last_mirror = time.monotonic()
+        handled = False
+        while True:
+            try:
+                daemon.wait(timeout=tick)
+                break
+            except subprocess.TimeoutExpired:
+                pass
+
+            status = ask({"cmd": "status"})
+            # An unanswered query says nothing about the streams: sound stays
+            # where it is, and only the idle clock keeps running.
+            if status is not None:
+                streams = streams_of(status)
+                if streams:
+                    last_mirror = time.monotonic()
+                if any(stream.get("state") == "streaming" and stream.get("has_audio") is True for stream in streams):
+                    if handled:
+                        settle_audio(mirroring=True)
+                    else:
+                        handled = engage_audio()
+                else:
+                    handled = False
+                    settle_audio()
+            if time.monotonic() - last_mirror > idle_limit:
+                break
+    finally:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        settle_audio()
+        if daemon is not None and daemon.poll() is None:
+            daemon.terminate()
+            try:
+                daemon.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                daemon.kill()
+                daemon.wait()
+    return OK
+
+
+COMMANDS = {
+    "status": command_status,
+    "up": command_up,
+    "down": command_down,
+    "connect": command_connect,
+    "disconnect": command_disconnect,
+    "supervise": command_supervise,
+    "restore-audio": command_restore_audio,
+}
+
+
+def main(argv):
+    if not argv or argv[0] not in COMMANDS:
+        print(json.dumps(fail("usage: airplay-ctl <%s>" % "|".join(COMMANDS))))
+        return 2
+    result = COMMANDS[argv[0]](argv[1:])
+    print(json.dumps(result))
+    return 1 if result.get("ok") is False else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

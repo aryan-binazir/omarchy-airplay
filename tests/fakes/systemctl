@@ -1,0 +1,26 @@
+#!/usr/bin/python3 -I
+"""Test stand-in for systemctl: units listed in a file are active; stop ends the launched unit."""
+import json
+import os
+import signal
+import sys
+
+LOG = os.environ["FAKE_LOG"]
+args = sys.argv[1:]
+with open(os.path.join(LOG, "systemctl.jsonl"), "a") as handle:
+    handle.write(json.dumps(args) + "\n")
+
+try:
+    with open(os.environ["FAKE_ACTIVE_UNITS"]) as handle:
+        active = handle.read().split()
+except OSError:
+    active = []
+
+if "is-active" in args:
+    sys.exit(0 if args[-1] in active else 3)
+if "stop" in args:
+    try:
+        with open(os.path.join(LOG, "unit.pid")) as handle:
+            os.kill(int(handle.read()), signal.SIGTERM)
+    except (OSError, ValueError):
+        pass

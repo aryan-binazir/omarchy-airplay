@@ -1,0 +1,44 @@
+#!/usr/bin/python3 -I
+"""Test stand-in for pactl: a sound server kept in a JSON file."""
+import json
+import os
+import sys
+
+STATE = os.environ["FAKE_PACTL_STATE"]
+args = sys.argv[1:]
+with open(os.path.join(os.environ["FAKE_LOG"], "pactl.jsonl"), "a") as handle:
+    handle.write(json.dumps(args) + "\n")
+
+with open(STATE) as handle:
+    state = json.load(handle)
+
+
+def save():
+    with open(STATE + ".tmp", "w") as handle:
+        json.dump(state, handle)
+    os.replace(STATE + ".tmp", STATE)
+
+
+if args[:2] == ["-f", "json"]:
+    args = args[2:]
+if args[:1] and args[0] in state.get("fail", []):
+    sys.exit(1)
+by_name = {sink["name"]: sink["index"] for sink in state["sinks"]}
+
+if args == ["list", "sinks"]:
+    print(json.dumps(state["sinks"]))
+elif args == ["list", "sink-inputs"]:
+    print(json.dumps(state["inputs"]))
+elif args == ["get-default-sink"]:
+    print(state["default"])
+elif len(args) == 2 and args[0] == "set-default-sink" and args[1] in by_name:
+    state["default"] = args[1]
+    save()
+elif len(args) == 3 and args[0] == "move-sink-input" and args[2] in by_name:
+    moved = [entry for entry in state["inputs"] if str(entry["index"]) == args[1]]
+    if not moved:
+        sys.exit(1)
+    moved[0]["sink"] = by_name[args[2]]
+    save()
+else:
+    sys.exit(1)

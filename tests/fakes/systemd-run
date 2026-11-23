@@ -1,0 +1,17 @@
+#!/usr/bin/python3 -I
+"""Test stand-in for systemd-run: records its arguments, and can launch the unit's command."""
+import json
+import os
+import subprocess
+import sys
+
+LOG = os.environ["FAKE_LOG"]
+args = sys.argv[1:]
+with open(os.path.join(LOG, "systemd-run.jsonl"), "a") as handle:
+    handle.write(json.dumps(args) + "\n")
+
+if os.environ.get("FAKE_SPAWN") == "1" and "--" in args:
+    child = subprocess.Popen(args[args.index("--") + 1:], start_new_session=True,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    with open(os.path.join(LOG, "unit.pid"), "w") as handle:
+        handle.write(str(child.pid))
