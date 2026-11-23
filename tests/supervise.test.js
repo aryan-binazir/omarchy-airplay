@@ -62,6 +62,23 @@ test("an output picked by hand while mirroring is kept afterwards", async (t) =>
   assert.equal(sinkOf(box, 5), 3)
 })
 
+test("sound returns when the TV's output vanishes while still mirroring", async (t) => {
+  const box = await mirroringWithSound(t)
+  box.setSound({ default: "headphones", sinks: [SPEAKERS, HEADPHONES], inputs: [browser(3), tuning] })
+  await waitFor(routedTo(box, "speakers"), "sound to return")
+  await waitFor(() => sinkOf(box, 5) === 1, "the browser to return")
+})
+
+test("an output picked by hand while mirroring is kept when the TV's output then vanishes", async (t) => {
+  const box = await mirroringWithSound(t)
+  box.setSound({ default: "headphones", sinks: [SPEAKERS, MIRROR, HEADPHONES], inputs: [browser(3), tuning] })
+  await sleep(300)
+  box.setSound({ default: "headphones", sinks: [SPEAKERS, HEADPHONES], inputs: [browser(3), tuning] })
+  await sleep(300)
+  assert.equal(box.sound().default, "headphones")
+  assert.equal(sinkOf(box, 5), 3)
+})
+
 test("a mirror without audio leaves sound alone", async (t) => {
   const box = start(t)
   box.setDaemon(mirrorTo({ has_audio: false }))
@@ -150,7 +167,9 @@ test("the service sleeps between checks instead of polling", async (t) => {
   const unit = box.pid("unit.pid")
   await sleep(500)
   const before = wakeups(unit)
+  const checksBefore = box.calls("requests").length
   await sleep(3000)
+  assert.ok(box.calls("requests").length - checksBefore >= 2, "the service kept checking")
   // Three checks of a socket round trip each; a polling wait wakes about twenty times a second.
   assert.ok(wakeups(unit) - before < 20, "woke " + (wakeups(unit) - before) + " times in 3 s")
 })
@@ -164,7 +183,7 @@ test("while sound stays on the TV, each check asks the sound server one question
   const checks = box.calls("requests").length - checksBefore
   const asked = box.calls("pactl").length - askedBefore
   assert.ok(checks >= 5, "the service kept checking")
-  assert.ok(asked >= 1 && asked <= checks + 1, asked + " sound server calls for " + checks + " checks")
+  assert.ok(asked >= checks - 1 && asked <= checks + 1, asked + " sound server calls for " + checks + " checks")
 })
 
 test("once the last panel has closed, the service stops as soon as mirroring ends", async (t) => {
