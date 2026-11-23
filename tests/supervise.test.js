@@ -13,7 +13,6 @@ const mirrorTo = (extra = {}) => ({ streams: [{ device: "TV", device_ip: "10.0.0
 const sinkOf = (box, input) => box.sound().inputs.find((entry) => entry.index === input).sink
 const routedTo = (box, name) => () => box.sound().default === name
 const stopped = (box) => () => !box.alive("unit.pid") && !box.alive("doubletake.pid")
-// How often a process has gone to sleep and been woken since it started.
 const wakeups = (pid) => Number(fs.readFileSync("/proc/" + pid + "/status", "utf8").match(/^voluntary_ctxt_switches:\s+(\d+)/m)[1])
 
 function start(t, env = {}) {
@@ -170,7 +169,6 @@ test("the service sleeps between checks instead of polling", async (t) => {
   const checksBefore = box.calls("requests").length
   await sleep(3000)
   assert.ok(box.calls("requests").length - checksBefore >= 2, "the service kept checking")
-  // Three checks of a socket round trip each; a polling wait wakes about twenty times a second.
   assert.ok(wakeups(unit) - before < 20, "woke " + (wakeups(unit) - before) + " times in 3 s")
 })
 

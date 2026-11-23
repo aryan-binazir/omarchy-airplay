@@ -193,7 +193,6 @@ def command_up(args):
         return fail("doubletake is not installed")
 
     with lock():
-        # A panel is open again: the daemon stays up for it.
         with contextlib.suppress(OSError):
             os.unlink(stop_request_path())
         if ask({"cmd": "status"}) is not None:
@@ -228,8 +227,6 @@ def command_up(args):
 def command_down(_args):
     with lock():
         status = ask({"cmd": "status"})
-        # A mirror, or a daemon too busy to say, stays; the supervisor stops
-        # the daemon once it answers that nothing is mirrored.
         if status is None or streams_of(status):
             try:
                 open(stop_request_path(), "w").close()
@@ -433,8 +430,6 @@ def settle_audio(mirroring=False):
         state = load_audio_state()
         if state is None:
             return True
-        # The steady state while mirroring: sound is still on the TV. One
-        # question settles it, so each check starts one pactl rather than two.
         if mirroring and (pactl("get-default-sink") or "").strip() == state["mirror"]:
             return True
         outputs = sound_outputs()
@@ -540,10 +535,7 @@ def end_daemon(daemon):
 
 
 def stopped_on_request(daemon):
-    """Stop the daemon if `down` asked for it and nothing is mirrored any more.
-
-    Decided and done under the lock, so a panel opening at the same moment
-    either cancels the request first or finds the daemon already gone."""
+    """Stop the daemon if `down` asked for it and nothing is mirrored any more."""
     if not os.path.exists(stop_request_path()):
         return False
     with lock():
