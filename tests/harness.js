@@ -80,6 +80,7 @@ function sandbox(t, { without = [] } = {}) {
     socketPath,
     alive,
     signal,
+    pid,
     ctlPath: CTL,
     ctl(args, input = "", extraEnv = {}) {
       const result = spawnSync(CTL, args, { env: { ...env, ...extraEnv }, input, encoding: "utf8", timeout: 20000 })

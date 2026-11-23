@@ -218,11 +218,12 @@ test("down stops the unit when nothing is being mirrored", async (t) => {
   assert.deepEqual(box.calls("systemctl"), [["--user", "stop", "omarchy-airplay.service"]])
 })
 
-test("down refuses while a receiver is being mirrored to", async (t) => {
+test("down leaves a receiver that is being mirrored to alone", async (t) => {
   const box = sandbox(t)
   await box.startDaemon({ streams: [streamTo("10.0.0.9", { state: "connecting" })] })
-  assert.equal(box.ctl(["down"]).json.ok, false)
+  assert.deepEqual(box.ctl(["down"]).json, { ok: true })
   assert.deepEqual(box.calls("systemctl"), [])
+  assert.equal(box.daemon().streams.length, 1)
 })
 
 test("a code is accepted as soon as its line arrives, without waiting for stdin to close", async (t) => {
