@@ -121,6 +121,13 @@ test("up replaces a unit of its own whose daemon stopped answering", (t) => {
   assert.equal(box.calls("systemd-run").length, 1)
 })
 
+test("up clears away a unit of its own that is still stopping before reusing its name", (t) => {
+  const box = sandbox(t)
+  assert.deepEqual(box.ctl(["up"]).json, { ok: true })
+  const calls = box.calls("systemctl").map((call) => call.join(" "))
+  assert.ok(calls.includes("--user stop omarchy-airplay.service"), calls.join("; "))
+})
+
 test("up reports a daemon that never comes up", (t) => {
   const box = sandbox(t)
   const result = box.ctl(["up"], "", { FAKE_SPAWN: "0", OMARCHY_AIRPLAY_READY: "0.3" })
@@ -224,6 +231,14 @@ test("down leaves a receiver that is being mirrored to alone", async (t) => {
   assert.deepEqual(box.ctl(["down"]).json, { ok: true })
   assert.deepEqual(box.calls("systemctl"), [])
   assert.equal(box.daemon().streams.length, 1)
+})
+
+test("down leaves a daemon that does not answer alone", (t) => {
+  const box = sandbox(t)
+  fs.mkdirSync(path.dirname(box.socketPath), { recursive: true })
+  fs.writeFileSync(box.socketPath, "")
+  assert.deepEqual(box.ctl(["down"]).json, { ok: true })
+  assert.deepEqual(box.calls("systemctl"), [])
 })
 
 test("a code is accepted as soon as its line arrives, without waiting for stdin to close", async (t) => {

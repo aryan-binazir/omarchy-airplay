@@ -200,8 +200,9 @@ def command_up(args):
             return OK
         if systemctl("is-active", "--quiet", STOCK_UNIT) == 0:
             return fail("doubletake.service is already running; stop it to mirror from the bar")
-        if systemctl("is-active", "--quiet", UNIT) == 0:
-            systemctl("stop", UNIT)
+        # A unit of ours that stopped answering, or is still running its stop
+        # actions, holds the name; stop waits until it is gone.
+        systemctl("stop", UNIT)
 
         try:
             started = subprocess.run(
@@ -227,9 +228,13 @@ def command_up(args):
 def command_down(_args):
     with lock():
         status = ask({"cmd": "status"})
-        if status is not None and streams_of(status):
-            # The mirror stays; the supervisor stops the daemon once it ends.
-            open(stop_request_path(), "w").close()
+        # A mirror, or a daemon too busy to say, stays; the supervisor stops
+        # the daemon once it answers that nothing is mirrored.
+        if status is None or streams_of(status):
+            try:
+                open(stop_request_path(), "w").close()
+            except OSError:
+                return fail("could not ask the AirPlay service to stop")
             return OK
         systemctl("stop", UNIT)
         return OK
