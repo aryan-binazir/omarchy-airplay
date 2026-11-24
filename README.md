@@ -4,6 +4,8 @@ An [Omarchy](https://omarchy.org/) bar widget that mirrors your desktop to an Ap
 
 It wraps [doubletake](https://github.com/omarroth/doubletake), which does the AirPlay mirroring.
 
+<img src="docs/screenshot.png" alt="The AirPlay panel open from the bar, mirroring to Living Room, with Bedroom and Studio listed as other receivers" width="453">
+
 ## Requirements
 
 - Omarchy 4.5 or later
