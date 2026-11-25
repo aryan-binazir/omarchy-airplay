@@ -36,8 +36,8 @@ The widget is part of the Omarchy shell, so it is there after every login.
 
 - **Left click** opens the receiver list. Click a receiver to mirror to it; click it again to stop. Picking a different receiver moves the mirror there.
 - **Right click** stops mirroring.
-- The first time you mirror to an Apple TV it shows a 4-digit code; type it into the panel. A screen-share picker also appears once: choose your screen.
-- To share something else, click the screen button on the receiver you are mirroring to, or right-click that receiver. Mirroring restarts and the screen-share picker appears again. This forgets the choice for every receiver, so each asks once more the next time.
+- The first time you mirror to an Apple TV it shows a 4-digit code; type it into the panel.
+- Each time you start mirroring, a screen-share picker asks what to share: a screen, a window or a region.
 - While mirroring, sound plays on the TV only. When mirroring stops, sound goes back to the output you had before. If you pick another output while mirroring, that choice is kept.
 
 The doubletake daemon runs only while the panel is open or something is being mirrored, in a user unit named `omarchy-airplay.service`. Once the panel is closed it stops as soon as mirroring ends, and in any case after five minutes without mirroring. If doubletake's own `doubletake.service` is running, the widget leaves it alone and asks you to stop it.
