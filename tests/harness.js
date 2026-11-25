@@ -54,7 +54,7 @@ function sandbox(t, { without = [] } = {}) {
     FAKE_ACTIVE_UNITS: activeUnits,
     FAKE_SPAWN: "1",
     OMARCHY_AIRPLAY_TICK: "0.05",
-    OMARCHY_AIRPLAY_IDLE: "0.5",
+    OMARCHY_AIRPLAY_IDLE: "5",
     OMARCHY_AIRPLAY_READY: "3"
   }
   const socketPath = path.join(run, "omarchy-airplay", "daemon.sock")
