@@ -116,17 +116,7 @@ Item {
     if (!Model.validTarget(ip)) return
     if (ports) portRange = String(ports)
     busyIp = ip
-    if (!daemon) enqueue(["up", portRange])
-    enqueue(["connect", ip])
-  }
-
-  // The screen-share picker only appears again once doubletake has forgotten
-  // the last choice, which means restarting it.
-  function reselect(ip, ports) {
-    if (!Model.validTarget(ip)) return
-    if (ports) portRange = String(ports)
-    busyIp = ip
-    enqueue(["reselect", ip, portRange])
+    enqueue(["connect", ip, portRange])
   }
 
   function submitCredential(ip, kind, value) {

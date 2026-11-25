@@ -4,6 +4,7 @@ const fs = require("node:fs")
 const path = require("node:path")
 const { sandbox, waitFor, sleep } = require("./harness.js")
 
+const PORTS = "60000-60010"
 const TV = { name: "Living Room", model: "AppleTV14,1", ip: "10.0.0.9", port: 7000, device_id: "AA:BB" }
 
 test("status says when doubletake is not installed", (t) => {
@@ -137,21 +138,21 @@ test("up reports a daemon that never comes up", (t) => {
 test("connect starts mirroring to the chosen receiver", async (t) => {
   const box = sandbox(t)
   await box.startDaemon({ devices: [TV] })
-  assert.deepEqual(box.ctl(["connect", "10.0.0.9"]).json, { ok: true })
+  assert.deepEqual(box.ctl(["connect", "10.0.0.9", PORTS]).json, { ok: true })
   assert.deepEqual(box.daemon().streams.map((stream) => stream.device_ip), ["10.0.0.9"])
 })
 
 test("connect moves the mirror from one receiver to another", async (t) => {
   const box = sandbox(t)
   await box.startDaemon({ streams: [streamTo("10.0.0.7")] })
-  assert.deepEqual(box.ctl(["connect", "10.0.0.9"]).json, { ok: true })
+  assert.deepEqual(box.ctl(["connect", "10.0.0.9", PORTS]).json, { ok: true })
   assert.deepEqual(box.daemon().streams.map((stream) => stream.device_ip), ["10.0.0.9"])
 })
 
 test("connect to the receiver already being mirrored to is a no-op", async (t) => {
   const box = sandbox(t)
   await box.startDaemon({ streams: [streamTo("10.0.0.9")] })
-  assert.deepEqual(box.ctl(["connect", "10.0.0.9"]).json, { ok: true })
+  assert.deepEqual(box.ctl(["connect", "10.0.0.9", PORTS]).json, { ok: true })
   assert.deepEqual(box.calls("requests").filter((request) => request.cmd !== "status"), [])
 })
 
@@ -159,15 +160,19 @@ test("connect refuses anything that is not an address literal", async (t) => {
   const box = sandbox(t)
   await box.startDaemon()
   for (const target of ["-socket", "tv.local", "10.0.0.9 10.0.0.7", "fe80::1%eth0", ""]) {
-    assert.equal(box.ctl(["connect", target]).json.ok, false, target)
+    assert.equal(box.ctl(["connect", target, PORTS]).json.ok, false, target)
   }
   assert.equal(box.ctl(["connect"]).json.ok, false)
+  assert.equal(box.ctl(["connect", "10.0.0.9"]).json.ok, false)
+  assert.equal(box.ctl(["connect", "10.0.0.9", "80-81"]).json.ok, false)
   assert.deepEqual(box.calls("requests"), [])
 })
 
-test("connect needs the daemon to be running", (t) => {
+test("connect starts the service when it is not running", (t) => {
   const box = sandbox(t)
-  assert.equal(box.ctl(["connect", "10.0.0.9"]).json.ok, false)
+  assert.deepEqual(box.ctl(["connect", "10.0.0.9", PORTS]).json, { ok: true })
+  assert.equal(box.calls("systemd-run").length, 1)
+  assert.deepEqual(box.daemon().streams.map((stream) => stream.device_ip), ["10.0.0.9"])
 })
 
 test("a code typed for a waiting receiver arrives on stdin and completes the connection", async (t) => {
@@ -249,54 +254,41 @@ test("a code is accepted as soon as its line arrives, without waiting for stdin 
   assert.deepEqual(result.json, { ok: true })
 })
 
-test("reselect restarts the service without saved screen choices and mirrors again", async (t) => {
+function saveCredentials(box, saved) {
+  const file = path.join(box.config, "doubletake", "credentials.json")
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, typeof saved === "string" ? saved : JSON.stringify(saved))
+  return file
+}
+
+test("connect restarts a daemon that saved a screen choice, so the picker asks again", async (t) => {
   const box = sandbox(t)
-  const credentials = path.join(box.config, "doubletake", "credentials.json")
-  fs.mkdirSync(path.dirname(credentials), { recursive: true })
-  fs.writeFileSync(credentials, JSON.stringify({
-    "AA:BB": { pairing_id: "p1", restore_token: "screen-1" },
-    "CC:DD": { pairing_id: "p2" }
-  }))
-  assert.deepEqual(box.ctl(["up", "60000-60010"]).json, { ok: true })
-  box.setDaemon({ devices: [TV] })
-  assert.deepEqual(box.ctl(["connect", "10.0.0.9"]).json, { ok: true })
+  const file = saveCredentials(box, { "AA:BB": { pairing_id: "p1", restore_token: "screen-1" }, "CC:DD": { pairing_id: "p2" } })
+  assert.deepEqual(box.ctl(["up", PORTS]).json, { ok: true })
   const before = box.pid("doubletake.pid")
 
-  assert.deepEqual(box.ctl(["reselect", "10.0.0.9", "60000-60010"]).json, { ok: true })
+  assert.deepEqual(box.ctl(["connect", "10.0.0.9", PORTS]).json, { ok: true })
   assert.notEqual(box.pid("doubletake.pid"), before)
-  assert.deepEqual(JSON.parse(fs.readFileSync(credentials, "utf8")), {
-    "AA:BB": { pairing_id: "p1" },
-    "CC:DD": { pairing_id: "p2" }
-  })
-  assert.equal(fs.statSync(credentials).mode & 0o777, 0o600)
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), { "AA:BB": { pairing_id: "p1" }, "CC:DD": { pairing_id: "p2" } })
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600)
   assert.deepEqual(box.daemon().streams.map((stream) => stream.device_ip), ["10.0.0.9"])
 })
 
-test("reselect works when doubletake has saved nothing yet", async (t) => {
+test("connect keeps a daemon with no saved screen choice", async (t) => {
   const box = sandbox(t)
-  assert.deepEqual(box.ctl(["up", "60000-60010"]).json, { ok: true })
-  assert.deepEqual(box.ctl(["reselect", "10.0.0.9", "60000-60010"]).json, { ok: true })
-  assert.deepEqual(box.daemon().streams.map((stream) => stream.device_ip), ["10.0.0.9"])
-  assert.equal(fs.existsSync(path.join(box.config, "doubletake")), false)
+  saveCredentials(box, { "AA:BB": { pairing_id: "p1" } })
+  assert.deepEqual(box.ctl(["up", PORTS]).json, { ok: true })
+  const before = box.pid("doubletake.pid")
+  assert.deepEqual(box.ctl(["connect", "10.0.0.9", PORTS]).json, { ok: true })
+  assert.equal(box.pid("doubletake.pid"), before)
 })
 
-test("reselect mirrors again but says so when the saved choices cannot be read", async (t) => {
+test("connect to the receiver already being mirrored to keeps its screen", async (t) => {
   const box = sandbox(t)
-  const credentials = path.join(box.config, "doubletake", "credentials.json")
-  fs.mkdirSync(path.dirname(credentials), { recursive: true })
-  fs.writeFileSync(credentials, "not json")
-  assert.deepEqual(box.ctl(["up", "60000-60010"]).json, { ok: true })
-  const result = box.ctl(["reselect", "10.0.0.9", "60000-60010"])
-  assert.equal(result.json.ok, false)
-  assert.match(result.json.error, /screen choice/)
-  assert.equal(fs.readFileSync(credentials, "utf8"), "not json")
-  assert.deepEqual(box.daemon().streams.map((stream) => stream.device_ip), ["10.0.0.9"])
-})
-
-test("reselect refuses a bad address or port range before touching anything", (t) => {
-  const box = sandbox(t)
-  assert.equal(box.ctl(["reselect", "tv.local", "60000-60010"]).json.ok, false)
-  assert.equal(box.ctl(["reselect", "10.0.0.9", "80-81"]).json.ok, false)
-  assert.equal(box.ctl(["reselect", "10.0.0.9"]).json.ok, false)
-  assert.deepEqual(box.calls("systemctl"), [])
+  assert.deepEqual(box.ctl(["up", PORTS]).json, { ok: true })
+  assert.deepEqual(box.ctl(["connect", "10.0.0.9", PORTS]).json, { ok: true })
+  saveCredentials(box, { "AA:BB": { pairing_id: "p1", restore_token: "screen-1" } })
+  const before = box.pid("doubletake.pid")
+  assert.deepEqual(box.ctl(["connect", "10.0.0.9", PORTS]).json, { ok: true })
+  assert.equal(box.pid("doubletake.pid"), before)
 })
