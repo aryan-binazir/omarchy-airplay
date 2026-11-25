@@ -1,9 +1,10 @@
 #!/usr/bin/python3 -I
-"""Test stand-in for systemctl: units listed in a file are active; stop ends the launched unit."""
+"""Test stand-in for systemctl: units listed in a file are active; stop ends the launched unit and waits for it."""
 import json
 import os
 import signal
 import sys
+import time
 
 LOG = os.environ["FAKE_LOG"]
 args = sys.argv[1:]
@@ -21,6 +22,11 @@ if "is-active" in args:
 if "stop" in args:
     try:
         with open(os.path.join(LOG, "unit.pid")) as handle:
-            os.kill(int(handle.read()), signal.SIGTERM)
+            pid = int(handle.read())
+        os.kill(pid, signal.SIGTERM)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            os.kill(pid, 0)
+            time.sleep(0.02)
     except (OSError, ValueError):
         pass

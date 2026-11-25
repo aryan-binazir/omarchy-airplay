@@ -11,6 +11,7 @@
   "row.mirroring": "Mirroring",
   "row.connecting": "Connecting…",
   "row.waiting": "Needs code",
+  "row.changeScreen": "Choose what to share",
   "prompt.pin": "Enter the code shown on %1",
   "prompt.password": "Enter the AirPlay password for %1",
   "prompt.pinPlaceholder": "4-digit code",

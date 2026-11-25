@@ -309,6 +309,61 @@ def command_disconnect(args):
         return answered(ask({"cmd": "disconnect", "target": address}))
 
 
+def credentials_path():
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(base, "doubletake", "credentials.json")
+
+
+def forget_screen_choices():
+    """Drop the screen-share choices doubletake saved, so the portal asks again.
+
+    The daemon keeps its own copy of this file and rewrites it from memory, so
+    this only holds while the daemon is stopped."""
+    path = credentials_path()
+    try:
+        with open(path) as handle:
+            saved = json.load(handle)
+    except FileNotFoundError:
+        return True
+    except (OSError, ValueError):
+        return False
+    if not isinstance(saved, dict):
+        return False
+    changed = False
+    for entry in saved.values():
+        if isinstance(entry, dict) and entry.pop("restore_token", None) is not None:
+            changed = True
+    if not changed:
+        return True
+    temporary = path + ".tmp"
+    try:
+        with open(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as handle:
+            json.dump(saved, handle, indent=2)
+        os.replace(temporary, path)
+    except OSError:
+        return False
+    return True
+
+
+def command_reselect(args):
+    """Mirror to a receiver again, asking anew which screen to share."""
+    if len(args) != 2:
+        return fail("usage: airplay-ctl reselect <address> <port range>")
+    address = receiver(args[0])
+    if address is None:
+        return fail("a receiver is named by its IP address")
+    if port_range(args[1]) is None:
+        return fail("the port range must look like 60000-60010, with at least three unprivileged ports")
+
+    with lock():
+        systemctl("stop", UNIT)
+        forgotten = forget_screen_choices()
+    for result in (command_up([args[1]]), command_connect([address])):
+        if result.get("ok") is not True:
+            return result
+    return OK if forgotten else fail("could not clear the saved screen choice")
+
+
 def pactl(*args):
     """Run pactl. Returns its output, or None when it failed."""
     try:
@@ -554,6 +609,7 @@ COMMANDS = {
     "down": command_down,
     "connect": command_connect,
     "disconnect": command_disconnect,
+    "reselect": command_reselect,
     "supervise": command_supervise,
     "restore-audio": command_restore_audio,
 }

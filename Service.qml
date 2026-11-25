@@ -120,6 +120,15 @@ Item {
     enqueue(["connect", ip])
   }
 
+  // The screen-share picker only appears again once doubletake has forgotten
+  // the last choice, which means restarting it.
+  function reselect(ip, ports) {
+    if (!Model.validTarget(ip)) return
+    if (ports) portRange = String(ports)
+    busyIp = ip
+    enqueue(["reselect", ip, portRange])
+  }
+
   function submitCredential(ip, kind, value) {
     if (!Model.validTarget(ip) || !Model.credentialValid(kind, value)) return false
     busyIp = ip

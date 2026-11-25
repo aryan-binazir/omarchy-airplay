@@ -31,6 +31,7 @@ Panel {
   // Material Design "cast" and "cast connected" from the bar's Nerd Font.
   readonly property string glyphIdle: String.fromCodePoint(0xF0118)
   readonly property string glyphOn: String.fromCodePoint(0xF0119)
+  readonly property string glyphScreen: String.fromCodePoint(0xF0379)
 
   readonly property var rows: service ? service.rows : []
   readonly property bool ready: !!service && service.loaded
@@ -98,6 +99,10 @@ Panel {
     if (!service || !row) return
     if (row.state === "idle") service.connectTo(row.ip, portRange)
     else service.disconnectFrom(row.ip)
+  }
+
+  function reselect(row) {
+    if (service && row && row.state === "streaming") service.reselect(row.ip, portRange)
   }
 
   function submitCredential() {
@@ -335,11 +340,15 @@ Panel {
       anchors.fill: parent
       hoverEnabled: true
       cursorShape: Qt.PointingHandCursor
+      acceptedButtons: Qt.LeftButton | Qt.RightButton
       onContainsMouseChanged: if (containsMouse && row.entry) {
         root.cursorActive = true
         root.cursorIp = row.entry.ip
       }
-      onClicked: root.activate(row.entry)
+      onClicked: function(mouse) {
+        if (mouse.button === Qt.RightButton) root.reselect(row.entry)
+        else root.activate(row.entry)
+      }
     }
 
     RowLayout {
@@ -394,6 +403,16 @@ Panel {
         font.family: root.fontFamily
         font.pixelSize: Style.font.bodySmall
         Layout.alignment: Qt.AlignVCenter
+      }
+
+      PanelActionButton {
+        visible: !!row.entry && row.entry.state === "streaming"
+        iconText: root.glyphScreen
+        tooltipText: strings.t("row.changeScreen")
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+        Layout.alignment: Qt.AlignVCenter
+        onClicked: root.reselect(row.entry)
       }
     }
   }

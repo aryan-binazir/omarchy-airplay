@@ -32,6 +32,7 @@ function sandbox(t, { without = [] } = {}) {
   const run = dir("run")
   const log = dir("log")
   const bin = dir("bin")
+  const config = dir("config")
   for (const fake of fs.readdirSync(FAKES)) {
     if (!without.includes(fake)) fs.symlinkSync(path.join(FAKES, fake), path.join(bin, fake))
   }
@@ -46,6 +47,7 @@ function sandbox(t, { without = [] } = {}) {
   const env = {
     PATH: bin,
     XDG_RUNTIME_DIR: run,
+    XDG_CONFIG_HOME: config,
     FAKE_LOG: log,
     FAKE_DAEMON_STATE: daemonState,
     FAKE_PACTL_STATE: pactlState,
@@ -77,6 +79,7 @@ function sandbox(t, { without = [] } = {}) {
   return {
     env,
     run,
+    config,
     socketPath,
     alive,
     signal,
@@ -106,10 +109,10 @@ function sandbox(t, { without = [] } = {}) {
       })
     },
     async startDaemon(state = {}) {
-      fs.writeFileSync(daemonState, JSON.stringify(state))
       fs.mkdirSync(path.dirname(socketPath), { recursive: true, mode: 0o700 })
       spawn(path.join(bin, "doubletake"), ["-daemonize", "-socket", socketPath], { env, stdio: "ignore" }).unref()
       await waitFor(() => fs.existsSync(socketPath), "the fake daemon's socket")
+      fs.writeFileSync(daemonState, JSON.stringify(state))
     },
     daemon: () => readJson(daemonState),
     setDaemon: (state) => fs.writeFileSync(daemonState, JSON.stringify(state)),
