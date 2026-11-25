@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "aryan-binazir.airplay",
   "name": "AirPlay",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "author": "Aryan Binazir",
   "license": "MIT",
   "description": "Mirror your desktop to an Apple TV or other AirPlay receiver from the bar. Needs doubletake.",

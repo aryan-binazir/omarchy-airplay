@@ -55,6 +55,7 @@ test("an output picked by hand while mirroring is kept afterwards", async (t) =>
   const box = await mirroringWithSound(t)
   box.setSound({ default: "headphones", sinks: [SPEAKERS, MIRROR, HEADPHONES], inputs: [browser(3), tuning] })
   await sleep(300)
+  assert.deepEqual(box.ctl(["down"]).json, { ok: true })
   box.setDaemon({ streams: [] })
   await waitFor(stopped(box), "the service to stop")
   assert.equal(box.sound().default, "headphones")
@@ -149,14 +150,14 @@ test("starting the service first puts back sound left over from an unclean stop"
 })
 
 test("the service stops itself once nothing has been mirrored for a while", async (t) => {
-  const box = start(t)
+  const box = start(t, { OMARCHY_AIRPLAY_IDLE: "0.5" })
   await waitFor(stopped(box), "the service to stop")
 })
 
 test("the service keeps running while a receiver is being mirrored to", async (t) => {
-  const box = start(t)
+  const box = start(t, { OMARCHY_AIRPLAY_IDLE: "1.5" })
   box.setDaemon(mirrorTo({ state: "pin_required", has_audio: false }))
-  await sleep(1200)
+  await sleep(3000)
   assert.equal(box.alive("unit.pid"), true)
   assert.equal(box.ctl(["status"]).json.daemon, true)
 })
