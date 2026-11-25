@@ -248,3 +248,55 @@ test("a code is accepted as soon as its line arrives, without waiting for stdin 
   assert.equal(result.timedOut, false)
   assert.deepEqual(result.json, { ok: true })
 })
+
+test("reselect restarts the service without saved screen choices and mirrors again", async (t) => {
+  const box = sandbox(t)
+  const credentials = path.join(box.config, "doubletake", "credentials.json")
+  fs.mkdirSync(path.dirname(credentials), { recursive: true })
+  fs.writeFileSync(credentials, JSON.stringify({
+    "AA:BB": { pairing_id: "p1", restore_token: "screen-1" },
+    "CC:DD": { pairing_id: "p2" }
+  }))
+  assert.deepEqual(box.ctl(["up", "60000-60010"]).json, { ok: true })
+  box.setDaemon({ devices: [TV] })
+  assert.deepEqual(box.ctl(["connect", "10.0.0.9"]).json, { ok: true })
+  const before = box.pid("doubletake.pid")
+
+  assert.deepEqual(box.ctl(["reselect", "10.0.0.9", "60000-60010"]).json, { ok: true })
+  assert.notEqual(box.pid("doubletake.pid"), before)
+  assert.deepEqual(JSON.parse(fs.readFileSync(credentials, "utf8")), {
+    "AA:BB": { pairing_id: "p1" },
+    "CC:DD": { pairing_id: "p2" }
+  })
+  assert.equal(fs.statSync(credentials).mode & 0o777, 0o600)
+  assert.deepEqual(box.daemon().streams.map((stream) => stream.device_ip), ["10.0.0.9"])
+})
+
+test("reselect works when doubletake has saved nothing yet", async (t) => {
+  const box = sandbox(t)
+  assert.deepEqual(box.ctl(["up", "60000-60010"]).json, { ok: true })
+  assert.deepEqual(box.ctl(["reselect", "10.0.0.9", "60000-60010"]).json, { ok: true })
+  assert.deepEqual(box.daemon().streams.map((stream) => stream.device_ip), ["10.0.0.9"])
+  assert.equal(fs.existsSync(path.join(box.config, "doubletake")), false)
+})
+
+test("reselect mirrors again but says so when the saved choices cannot be read", async (t) => {
+  const box = sandbox(t)
+  const credentials = path.join(box.config, "doubletake", "credentials.json")
+  fs.mkdirSync(path.dirname(credentials), { recursive: true })
+  fs.writeFileSync(credentials, "not json")
+  assert.deepEqual(box.ctl(["up", "60000-60010"]).json, { ok: true })
+  const result = box.ctl(["reselect", "10.0.0.9", "60000-60010"])
+  assert.equal(result.json.ok, false)
+  assert.match(result.json.error, /screen choice/)
+  assert.equal(fs.readFileSync(credentials, "utf8"), "not json")
+  assert.deepEqual(box.daemon().streams.map((stream) => stream.device_ip), ["10.0.0.9"])
+})
+
+test("reselect refuses a bad address or port range before touching anything", (t) => {
+  const box = sandbox(t)
+  assert.equal(box.ctl(["reselect", "tv.local", "60000-60010"]).json.ok, false)
+  assert.equal(box.ctl(["reselect", "10.0.0.9", "80-81"]).json.ok, false)
+  assert.equal(box.ctl(["reselect", "10.0.0.9"]).json.ok, false)
+  assert.deepEqual(box.calls("systemctl"), [])
+})

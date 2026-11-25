@@ -60,6 +60,10 @@ def main():
     with open(os.path.join(LOG, "doubletake.pid"), "w") as handle:
         handle.write(str(os.getpid()))
     path = args[args.index("-socket") + 1]
+    # Like the real daemon, a new one is mirroring to nothing.
+    state = load()
+    state["streams"] = []
+    save(state)
 
     def stop(*_):
         raise SystemExit(0)
