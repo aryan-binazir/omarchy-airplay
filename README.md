@@ -52,7 +52,7 @@ The doubletake daemon runs only while the panel is open or something is being mi
 make test
 ```
 
-This checks that `manifest.json` and `i18n/en.json` are valid JSON, then runs the node tests. The tests run the real helper against fake `doubletake`, `pactl` and `systemd` programs, so they never touch a receiver or your sound settings.
+This parses `manifest.json` and `i18n/en.json` with `jq`, then runs the node tests. The tests run the real helper against fake `doubletake`, `pactl` and `systemd` programs, so they never touch a receiver or your sound settings.
 
 ## License
 
