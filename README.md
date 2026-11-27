@@ -52,7 +52,7 @@ The doubletake daemon runs only while the panel is open or something is being mi
 make test
 ```
 
-This parses `manifest.json` and `i18n/en.json` with `jq`, then runs the node tests. The tests run the real helper against fake `doubletake`, `pactl` and `systemd` programs, so they never touch a receiver or your sound settings.
+This parses `manifest.json` and `i18n/en.json` with `jq`, then runs the node tests. The tests run the real helper against fake `doubletake`, `pactl` and `systemd` programs, so they never touch a receiver or your sound settings. Last, `Service.qml` runs under Qt 6's `qmltestrunner` (from `qt6-declarative`) against a fake `Quickshell.Io` in `tests/qml`, offscreen, so no window opens.
 
 ## License
 

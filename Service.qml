@@ -63,9 +63,10 @@ Item {
   }
 
   function enqueue(args, secret, quiet) {
-    if (queue.length >= 8) return
+    if (queue.length >= 8) return false
     queue = queue.concat([{ args: args, secret: secret || "", quiet: quiet === true }])
     pump()
+    return true
   }
 
   function pump() {
@@ -122,8 +123,7 @@ Item {
   function submitCredential(ip, kind, value) {
     if (!Model.validTarget(ip) || !Model.credentialValid(kind, value)) return false
     busyIp = ip
-    enqueue(["connect", ip, "--credential-stdin"], value)
-    return true
+    return enqueue(["connect", ip, "--credential-stdin"], value)
   }
 
   function disconnectFrom(ip) {
