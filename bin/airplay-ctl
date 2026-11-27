@@ -150,7 +150,8 @@ def text(value, limit):
 
 
 def read_status():
-    """The daemon's state, cut down to the fields the widget shows.
+    """The daemon's state, cut down to the fields the widget shows, plus the
+    overall state and has_audio for whoever runs `status` by hand.
 
     Receiver names come off the network, so everything is bounded here before
     the shell collects it."""

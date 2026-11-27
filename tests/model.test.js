@@ -33,13 +33,11 @@ test("devices and streams are read from a running daemon", () => {
   const status = Model.parseStatus(JSON.stringify({
     installed: true,
     daemon: true,
-    state: "streaming",
     error: "",
     devices: [{ name: "Living Room", model: "AppleTV14,1", ip: "192.168.1.20", port: 7000, device_id: "AA:BB" }],
     streams: [{ device: "Living Room", device_ip: "192.168.1.20", state: "streaming", has_audio: true }]
   }))
   assert.equal(status.daemon, true)
-  assert.equal(status.state, "streaming")
   assert.deepEqual(status.devices, [{ name: "Living Room", model: "AppleTV14,1", ip: "192.168.1.20" }])
   assert.deepEqual(status.streams, [{ name: "Living Room", ip: "192.168.1.20", state: "streaming", credentialKind: "" }])
 })
@@ -75,8 +73,9 @@ test("entries without an IP address literal are dropped", () => {
 test("an unknown state is treated as idle and the list sizes are capped", () => {
   const devices = []
   for (let i = 0; i < 100; i++) devices.push({ name: "tv" + i, ip: "10.0.0." + (i + 1) })
-  const status = Model.parseStatus(JSON.stringify({ installed: true, daemon: true, state: "exploding", devices }))
-  assert.equal(status.state, "idle")
+  const streams = [{ device: "TV", device_ip: "10.0.0.9", state: "exploding" }]
+  const status = Model.parseStatus(JSON.stringify({ installed: true, daemon: true, devices, streams }))
+  assert.equal(status.streams[0].state, "idle")
   assert.equal(status.devices.length, 32)
 })
 
