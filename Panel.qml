@@ -47,7 +47,6 @@ Panel {
   }
   readonly property string promptIp: prompt ? prompt.ip : ""
   readonly property string promptKind: prompt && prompt.credentialKind === "password" ? "password" : "pin"
-  property string credentialText: ""
 
   property string cursorIp: ""
   property bool cursorActive: false
@@ -100,15 +99,12 @@ Panel {
     else service.disconnectFrom(row.ip)
   }
 
-  function submitCredential() {
+  function submitCredential(value) {
     if (!service || promptIp === "") return false
-    if (!service.submitCredential(promptIp, promptKind, credentialText)) return false
-    credentialText = ""
-    return true
+    return service.submitCredential(promptIp, promptKind, value)
   }
 
   function cancelCredential() {
-    credentialText = ""
     if (service && promptIp !== "") service.disconnectFrom(promptIp)
   }
 
@@ -135,7 +131,6 @@ Panel {
     watching = false
     syncWatch()
   }
-  onPromptIpChanged: credentialText = ""
   Component.onDestruction: if (watching && service) service.unwatch()
 
   Commons.Translations {
@@ -261,8 +256,7 @@ Panel {
               placeholderText: root.promptKind === "password"
                 ? strings.t("prompt.passwordPlaceholder") : strings.t("prompt.pinPlaceholder")
               foreground: root.foreground
-              onTextChanged: if (text !== root.credentialText) root.credentialText = text
-              onAccepted: if (root.submitCredential()) text = ""
+              onAccepted: if (root.submitCredential(text)) text = ""
               Keys.onEscapePressed: {
                 text = ""
                 root.cancelCredential()
@@ -275,7 +269,7 @@ Panel {
               foreground: root.foreground
               fontFamily: root.fontFamily
               Layout.alignment: Qt.AlignVCenter
-              onClicked: if (root.submitCredential()) credentialField.text = ""
+              onClicked: if (root.submitCredential(credentialField.text)) credentialField.text = ""
             }
           }
         }
