@@ -200,13 +200,16 @@ test("a code from a panel older than the answer command still completes the conn
     [{ cmd: "connect", target: "10.0.0.9", pin: "6842" }])
 })
 
-test("answer refuses a missing, extra or non-literal receiver before asking the daemon", async (t) => {
+test("answer refuses a missing, extra or non-literal receiver before reading a code or asking the daemon", async (t) => {
   const box = sandbox(t)
   await box.startDaemon({ streams: [streamTo("10.0.0.9", { state: "pin_required", credential_kind: "pin" })] })
   for (const args of [[], ["10.0.0.9", "60000-60010"], ["tv.local"]]) {
     const result = box.ctl(["answer", ...args], "6842\n")
     assert.equal(result.json.ok, false, args.join(" "))
     assert.equal(result.status, 1, args.join(" "))
+    const waiting = await box.ctlKeepingStdinOpen(["answer", ...args], "")
+    assert.equal(waiting.timedOut, false, args.join(" "))
+    assert.equal(waiting.json.ok, false, args.join(" "))
   }
   assert.deepEqual(box.calls("requests"), [])
 })
