@@ -29,7 +29,7 @@ test("a socket nobody answers on is a stopped daemon", (t) => {
 
 test("status merges the daemon's streams, receivers and last error", async (t) => {
   const box = sandbox(t)
-  const stream = { device: "Living Room", device_ip: "10.0.0.9", state: "pin_required", credential_kind: "pin" }
+  const stream = { device: "Lounge", device_ip: "10.0.0.9", state: "pin_required", credential_kind: "pin" }
   await box.startDaemon({ state: "pin_required", error: "earlier failure", devices: [TV], streams: [stream] })
   const result = box.ctl(["status"])
   assert.deepEqual(result.json, {
@@ -38,7 +38,7 @@ test("status merges the daemon's streams, receivers and last error", async (t) =
     state: "pin_required",
     error: "earlier failure",
     devices: [{ name: "Living Room", model: "AppleTV14,1", ip: "10.0.0.9" }],
-    streams: [{ device: "Living Room", device_ip: "10.0.0.9", state: "pin_required", credential_kind: "pin", has_audio: false }]
+    streams: [{ device: "Lounge", device_ip: "10.0.0.9", state: "pin_required", credential_kind: "pin", has_audio: false }]
   })
 
   // The widget reads this output through Model.js, so a field renamed on one
@@ -46,7 +46,7 @@ test("status merges the daemon's streams, receivers and last error", async (t) =
   const status = Model.parseStatus(result.stdout)
   assert.deepEqual([status.ok, status.installed, status.daemon, status.error], [true, true, true, "earlier failure"])
   assert.deepEqual(Model.rows(status), [
-    { ip: "10.0.0.9", name: "Living Room", model: "AppleTV14,1", state: "pin_required", credentialKind: "pin" }
+    { ip: "10.0.0.9", name: "Lounge", model: "AppleTV14,1", state: "pin_required", credentialKind: "pin" }
   ])
 })
 
