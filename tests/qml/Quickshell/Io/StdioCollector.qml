@@ -1,6 +1,6 @@
 import QtQml
 QtObject {
-  property bool waitForEnd: false
+  property bool waitForEnd: true
   property string text: ""
   signal streamFinished()
 }

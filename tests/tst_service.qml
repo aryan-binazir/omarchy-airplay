@@ -52,7 +52,10 @@ TestCase {
     status.complete(JSON.stringify({
       installed: true, daemon: true,
       devices: [{ name: "Living Room", ip: tv }, { name: "Den", ip: "10.0.0.7" }],
-      streams: [{ device: "Living Room", device_ip: tv, state: "streaming" }]
+      streams: [
+        { device: "Living Room", device_ip: tv, state: "streaming" },
+        { device: "Den", device_ip: "10.0.0.7", state: "connecting" }
+      ]
     }))
     compare(service.loaded, true)
     compare(service.installed, true)
@@ -60,27 +63,30 @@ TestCase {
     compare(service.rows.length, 2)
     compare(service.mirroring, true)
     compare(service.mirrorName, "Living Room")
+    compare(service.pending, true)
 
     service.refresh()
     compare(status.runs.length, 2)
     status.complete("not json")
+    compare(service.loaded, true)
     compare(service.daemon, true)
     compare(service.rows.length, 2)
     compare(service.mirrorName, "Living Room")
+    compare(service.pending, true)
   }
 
   function test_actions_run_one_at_a_time_in_order() {
-    service.connectTo(tv, ports)
+    service.connectTo(tv, "61000-61010")
     service.disconnectFrom(tv)
     service.disconnectAll()
-    compare(action.runs, [["connect", tv, ports]])
+    compare(action.runs, [["connect", tv, "61000-61010"]])
     compare(service.busyIp, tv)
     next()
     compare(service.busyIp, tv)
     next()
     action.complete(ok)
     compare(service.busyIp, "")
-    compare(action.runs, [["connect", tv, ports], ["disconnect", tv], ["disconnect"]])
+    compare(action.runs, [["connect", tv, "61000-61010"], ["disconnect", tv], ["disconnect"]])
   }
 
   function test_at_most_eight_actions_wait_behind_the_running_one() {
@@ -98,6 +104,12 @@ TestCase {
     service.disconnectAll()
     for (var i = 1; i <= 8; i++) service.disconnectFrom("10.0.0." + i)
     compare(service.submitCredential(tv, "pin", "6842"), false)
+    for (var n = 0; n < 8; n++) next()
+    action.complete(ok)
+    wait(50)
+    compare(action.runs.length, 9)
+    compare(action.runs[8], ["disconnect", "10.0.0.8"])
+    compare(action.stdin.join(""), "")
   }
 
   function test_result_waits_for_both_output_and_exit() {
@@ -142,15 +154,19 @@ TestCase {
   }
 
   function test_code_goes_to_its_own_run_over_stdin_never_argv() {
+    service.disconnectAll()
+    service.disconnectFrom("10.0.0.7")
     verify(service.submitCredential(tv, "pin", "6842"))
     compare(service.busyIp, tv)
-    service.disconnectAll()
-    compare(action.runs.length, 1)
-    verify(action.runs[0].indexOf(tv) !== -1)
-    verify(action.runs[0].join(" ").indexOf("6842") === -1)
-    compare(action.stdin[0], "6842\n")
+    service.disconnectFrom(tv)
     next()
-    compare(action.stdin[1], "")
+    next()
+    verify(action.command.join(" ").indexOf(tv) !== -1)
+    compare(action.command.join(" ").indexOf("6842"), -1)
+    tryVerify(function() { return action.stdin[2] === "6842\n" }, 1000, "code sent")
+    next()
+    action.complete(ok)
+    compare(action.stdin, ["", "", "6842\n", ""])
   }
 
   function test_invalid_requests_never_reach_the_helper() {
@@ -164,13 +180,14 @@ TestCase {
   function test_stuck_action_is_stopped_and_the_next_waits_for_it_to_exit() {
     service.connectTo(tv)
     service.disconnectAll()
+    verify(watchdog.running)
     watchdog.triggered()
     verify(action.stopRequested)
     compare(service.error, "failed")
     wait(50)
     compare(action.runs.length, 1)
     action.endOutput("")
-    action.exitWith(15)
+    action.exitWith(15, true)
     tryVerify(function() { return action.runs.length === 2 }, 1000)
     compare(action.runs[1], ["disconnect"])
   }
