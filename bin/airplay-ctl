@@ -260,24 +260,35 @@ def read_credential():
     return text
 
 
-def command_connect(args):
-    """`connect <address> <port range>` mirrors to a receiver, asking which screen
-    to share; `connect <address> --credential-stdin` answers its code prompt."""
-    if len(args) != 2:
-        return fail("usage: airplay-ctl connect <address> (<port range> | --credential-stdin)")
+def command_answer(args):
+    """`answer <address>` sends the code a receiver is waiting for, read from stdin."""
+    if len(args) != 1:
+        return fail("usage: airplay-ctl answer <address>, with the code on stdin")
     address = receiver(args[0])
     if address is None:
         return fail("a receiver is named by its IP address")
-    if args[1] == "--credential-stdin":
-        credential = read_credential()
-        if credential is None:
-            return fail("that code cannot be used")
-        with lock():
-            status = ask({"cmd": "status"}) or {}
-            current = next((stream for stream in streams_of(status) if stream.get("device_ip") == address), None)
-            if current is None or current.get("state") != "pin_required":
-                return fail("that receiver is not waiting for a code")
-            return answered(ask({"cmd": "connect", "target": address, "pin": credential}))
+    credential = read_credential()
+    if credential is None:
+        return fail("that code cannot be used")
+    with lock():
+        status = ask({"cmd": "status"}) or {}
+        current = next((stream for stream in streams_of(status) if stream.get("device_ip") == address), None)
+        if current is None or current.get("state") != "pin_required":
+            return fail("that receiver is not waiting for a code")
+        return answered(ask({"cmd": "connect", "target": address, "pin": credential}))
+
+
+def command_connect(args):
+    """`connect <address> <port range>` mirrors to a receiver, asking which screen to share."""
+    # A Service.qml from before `answer` can still be running while an update
+    # replaces this file.
+    if len(args) == 2 and args[1] == "--credential-stdin":
+        return command_answer(args[:1])
+    if len(args) != 2:
+        return fail("usage: airplay-ctl connect <address> <port range>")
+    address = receiver(args[0])
+    if address is None:
+        return fail("a receiver is named by its IP address")
     ports = port_range(args[1])
     if ports is None:
         return fail("the port range must look like 60000-60010, with at least three unprivileged ports")
@@ -613,6 +624,7 @@ COMMANDS = {
     "up": command_up,
     "down": command_down,
     "connect": command_connect,
+    "answer": command_answer,
     "disconnect": command_disconnect,
     "supervise": command_supervise,
     "restore-audio": command_restore_audio,

@@ -123,7 +123,7 @@ Item {
   function submitCredential(ip, kind, value) {
     if (!Model.validTarget(ip) || !Model.credentialValid(kind, value)) return false
     busyIp = ip
-    return enqueue(["connect", ip, "--credential-stdin"], value)
+    return enqueue(["answer", ip], value)
   }
 
   function disconnectFrom(ip) {
