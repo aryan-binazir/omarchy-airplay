@@ -2,10 +2,10 @@ const test = require("node:test")
 const assert = require("node:assert/strict")
 const fs = require("node:fs")
 const path = require("node:path")
-const { sandbox, waitFor, sleep } = require("./harness.js")
+const { sandbox } = require("./harness.js")
 const Model = require("../Model.js")
 
-const PORTS = "60000-60010"
+const PORTS = "61000-61010"
 const TV = { name: "Living Room", model: "AppleTV14,1", ip: "10.0.0.9", port: 7000, device_id: "AA:BB" }
 
 test("status says when doubletake is not installed", (t) => {
@@ -82,7 +82,7 @@ const streamTo = (ip, extra = {}) => ({ device: "Receiver " + ip, device_ip: ip,
 
 test("up starts the daemon in a transient user unit and waits until it answers", (t) => {
   const box = sandbox(t)
-  const result = box.ctl(["up", "60000-60010"])
+  const result = box.ctl(["up", PORTS])
   assert.deepEqual(result.json, { ok: true })
 
   const [started] = box.calls("systemd-run")
@@ -90,9 +90,9 @@ test("up starts the daemon in a transient user unit and waits until it answers",
   assert.ok(started.includes("--collect"))
   assert.ok(started.includes("--unit=omarchy-airplay.service"))
   assert.ok(started.includes('--property=ExecStopPost="' + box.ctlPath + '" restore-audio'))
-  assert.deepEqual(started.slice(started.indexOf("--") + 1), [box.ctlPath, "supervise", "60000-60010"])
+  assert.deepEqual(started.slice(started.indexOf("--") + 1), [box.ctlPath, "supervise", PORTS])
 
-  assert.deepEqual(box.daemonArgv(), ["-daemonize", "-socket", box.socketPath, "-port-range", "60000-60010"])
+  assert.deepEqual(box.daemonArgv(), ["-daemonize", "-socket", box.socketPath, "-port-range", PORTS])
   assert.equal(box.ctl(["status"]).json.daemon, true)
 })
 
@@ -122,19 +122,16 @@ test("up leaves a running doubletake.service alone and says so", (t) => {
   assert.deepEqual(box.calls("systemd-run"), [])
 })
 
-test("up replaces a unit of its own whose daemon stopped answering", (t) => {
-  const box = sandbox(t)
-  box.setActiveUnits(["omarchy-airplay.service"])
-  assert.deepEqual(box.ctl(["up"]).json, { ok: true })
-  assert.ok(box.calls("systemctl").some((call) => call.join(" ") === "--user stop omarchy-airplay.service"))
-  assert.equal(box.calls("systemd-run").length, 1)
-})
-
-test("up clears away a unit of its own that is still stopping before reusing its name", (t) => {
-  const box = sandbox(t)
-  assert.deepEqual(box.ctl(["up"]).json, { ok: true })
-  const calls = box.calls("systemctl").map((call) => call.join(" "))
-  assert.ok(calls.includes("--user stop omarchy-airplay.service"), calls.join("; "))
+test("up stops a unit of its own before reusing its name, whether it still reports active or is already stopping", (t) => {
+  for (const units of [["omarchy-airplay.service"], []]) {
+    const label = "active units: " + (units.join() || "none")
+    const box = sandbox(t)
+    box.setActiveUnits(units)
+    assert.deepEqual(box.ctl(["up"]).json, { ok: true }, label)
+    const calls = box.calls("systemctl").map((call) => call.join(" "))
+    assert.ok(calls.includes("--user stop omarchy-airplay.service"), label + "; " + calls.join("; "))
+    assert.equal(box.calls("systemd-run").length, 1, label)
+  }
 })
 
 test("up reports a daemon that never comes up", (t) => {
@@ -203,7 +200,7 @@ test("a code from a panel older than the answer command still completes the conn
 test("answer refuses a missing, extra or non-literal receiver before reading a code or asking the daemon", async (t) => {
   const box = sandbox(t)
   await box.startDaemon({ streams: [streamTo("10.0.0.9", { state: "pin_required", credential_kind: "pin" })] })
-  for (const args of [[], ["10.0.0.9", "60000-60010"], ["tv.local"]]) {
+  for (const args of [[], ["10.0.0.9", PORTS], ["tv.local"]]) {
     const result = box.ctl(["answer", ...args], "6842\n")
     assert.equal(result.json.ok, false, args.join(" "))
     assert.equal(result.status, 1, args.join(" "))
@@ -222,7 +219,7 @@ test("a code for a receiver that is not waiting for one is not sent", async (t) 
   assert.deepEqual(box.calls("requests").filter((request) => request.cmd === "connect"), [])
 })
 
-test("an empty or multi-line code is refused", async (t) => {
+test("an empty, overlong or control-character code is refused", async (t) => {
   const box = sandbox(t)
   await box.startDaemon({ streams: [streamTo("10.0.0.9", { state: "pin_required", credential_kind: "password" })] })
   for (const input of ["", "\n", "p".repeat(200) + "\n", "tab\there\n"]) {
@@ -287,7 +284,7 @@ test("a code is accepted as soon as its line arrives, without waiting for stdin 
 function saveCredentials(box, saved) {
   const file = path.join(box.config, "doubletake", "credentials.json")
   fs.mkdirSync(path.dirname(file), { recursive: true })
-  fs.writeFileSync(file, typeof saved === "string" ? saved : JSON.stringify(saved))
+  fs.writeFileSync(file, JSON.stringify(saved))
   return file
 }
 
