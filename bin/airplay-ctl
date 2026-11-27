@@ -27,6 +27,7 @@ SELF = os.path.abspath(__file__)
 MAX_REPLY = 1 << 20
 MAX_ENTRIES = 64
 MAX_NAME = 160
+MAX_ADDRESS = 45
 MAX_ERROR = 500
 MAX_CREDENTIAL = 128
 SOCKET_TIMEOUT = 3.0
@@ -35,7 +36,7 @@ OK = {"ok": True}
 
 
 def fail(message):
-    return {"ok": False, "error": str(message)[:500]}
+    return {"ok": False, "error": str(message)[:MAX_ERROR]}
 
 
 def seconds(name, default):
@@ -149,7 +150,7 @@ def text(value, limit):
     return value[:limit] if isinstance(value, str) else ""
 
 
-def read_status():
+def command_status(_args):
     """The daemon's state, cut down to the fields the widget shows, plus the
     overall state and has_audio for whoever runs `status` by hand.
 
@@ -163,11 +164,11 @@ def read_status():
     found = ask({"cmd": "devices"}) or {}
     devices = [
         {"name": text(device.get("name"), MAX_NAME), "model": text(device.get("model"), MAX_NAME),
-         "ip": text(device.get("ip"), 45)}
+         "ip": text(device.get("ip"), MAX_ADDRESS)}
         for device in entries(found.get("devices")) if isinstance(device, dict)
     ]
     streams = [
-        {"device": text(stream.get("device"), MAX_NAME), "device_ip": text(stream.get("device_ip"), 45),
+        {"device": text(stream.get("device"), MAX_NAME), "device_ip": text(stream.get("device_ip"), MAX_ADDRESS),
          "state": text(stream.get("state"), 32), "credential_kind": text(stream.get("credential_kind"), 16),
          "has_audio": stream.get("has_audio") is True}
         for stream in streams_of(status)
@@ -180,10 +181,6 @@ def read_status():
         "devices": devices,
         "streams": streams,
     }
-
-
-def command_status(_args):
-    return read_status()
 
 
 def command_up(args):

@@ -77,8 +77,6 @@ function sandbox(t, { without = [] } = {}) {
   })
 
   return {
-    env,
-    run,
     config,
     socketPath,
     alive,

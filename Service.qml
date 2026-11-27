@@ -1,5 +1,4 @@
 import QtQuick
-import Quickshell
 import Quickshell.Io
 import "Model.js" as Model
 
@@ -9,9 +8,6 @@ import "Model.js" as Model
 // reads its answers.
 Item {
   id: root
-
-  property var shell: null
-  property var manifest: null
 
   readonly property string helper: decodeURIComponent(String(Qt.resolvedUrl("bin/airplay-ctl")).replace(/^file:\/\//, ""))
 

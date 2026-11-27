@@ -4,7 +4,6 @@ import QtTest
 TestCase {
   name: "Service"
 
-  readonly property string ports: "60000-60010"
   readonly property string tv: "10.0.0.9"
   readonly property string ok: '{"ok": true}'
 
