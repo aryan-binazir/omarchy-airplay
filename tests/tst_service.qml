@@ -1,9 +1,6 @@
 import QtQuick
 import QtTest
 
-// Service.qml against the fake Quickshell.Io in tests/qml. Each test drives the
-// service the way Panel.qml does and plays the helper by ending the fake
-// Process's runs by hand.
 TestCase {
   name: "Service"
 
@@ -38,8 +35,7 @@ TestCase {
     service = status = action = watchdog = null
   }
 
-  // Ends the running action and waits for the next queued one to start.
-  function next(text) {
+  function completeAndAwaitNext(text) {
     var started = action.runs.length
     action.complete(text === undefined ? ok : text)
     tryVerify(function() { return action.runs.length === started + 1 }, 1000, "next action started")
@@ -81,9 +77,9 @@ TestCase {
     service.disconnectAll()
     compare(action.runs, [["connect", tv, "61000-61010"]])
     compare(service.busyIp, tv)
-    next()
+    completeAndAwaitNext()
     compare(service.busyIp, tv)
-    next()
+    completeAndAwaitNext()
     action.complete(ok)
     compare(service.busyIp, "")
     compare(action.runs, [["connect", tv, "61000-61010"], ["disconnect", tv], ["disconnect"]])
@@ -92,7 +88,7 @@ TestCase {
   function test_at_most_eight_actions_wait_behind_the_running_one() {
     service.disconnectAll()
     for (var i = 1; i <= 9; i++) service.disconnectFrom("10.0.0." + i)
-    for (var n = 0; n < 8; n++) next()
+    for (var n = 0; n < 8; n++) completeAndAwaitNext()
     action.complete(ok)
     wait(50)
     compare(action.runs.length, 9)
@@ -104,7 +100,7 @@ TestCase {
     service.disconnectAll()
     for (var i = 1; i <= 8; i++) service.disconnectFrom("10.0.0." + i)
     compare(service.submitCredential(tv, "pin", "6842"), false)
-    for (var n = 0; n < 8; n++) next()
+    for (var n = 0; n < 8; n++) completeAndAwaitNext()
     action.complete(ok)
     wait(50)
     compare(action.runs.length, 9)
@@ -120,9 +116,7 @@ TestCase {
     compare(service.error, "receiver refused")
   }
 
-  // Quickshell was only seen ending output first; Service.qml says either
-  // order can happen, so hold it to that.
-  function test_result_waits_for_both_when_exit_comes_first() {
+  function test_result_waits_for_both_in_the_unobserved_exit_first_order() {
     service.connectTo(tv)
     action.exitWith(1)
     compare(service.error, "")
@@ -135,7 +129,7 @@ TestCase {
     service.watch("61000-61010")
     compare(service.watchers, 2)
     compare(action.runs, [["up", "61000-61010"]])
-    next('{"ok": false, "error": "port busy"}')
+    completeAndAwaitNext('{"ok": false, "error": "port busy"}')
     compare(service.error, "port busy")
     action.complete(ok)
     compare(service.error, "")
@@ -159,12 +153,12 @@ TestCase {
     verify(service.submitCredential(tv, "pin", "6842"))
     compare(service.busyIp, tv)
     service.disconnectFrom(tv)
-    next()
-    next()
+    completeAndAwaitNext()
+    completeAndAwaitNext()
     verify(action.command.join(" ").indexOf(tv) !== -1)
     compare(action.command.join(" ").indexOf("6842"), -1)
     tryVerify(function() { return action.stdin[2] === "6842\n" }, 1000, "code sent")
-    next()
+    completeAndAwaitNext()
     action.complete(ok)
     compare(action.stdin, ["", "", "6842\n", ""])
   }
@@ -176,7 +170,6 @@ TestCase {
     compare(action.runs, [])
   }
 
-  // Quickshell was seen keeping a stopped process running until it exits.
   function test_stuck_action_is_stopped_and_the_next_waits_for_it_to_exit() {
     service.connectTo(tv)
     service.disconnectAll()
