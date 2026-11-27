@@ -124,12 +124,13 @@ test("up leaves a running doubletake.service alone and says so", (t) => {
 
 test("up stops a unit of its own before reusing its name, whether it still reports active or is already stopping", (t) => {
   for (const units of [["omarchy-airplay.service"], []]) {
+    const label = "active units: " + (units.join() || "none")
     const box = sandbox(t)
     box.setActiveUnits(units)
-    assert.deepEqual(box.ctl(["up"]).json, { ok: true }, units.join())
+    assert.deepEqual(box.ctl(["up"]).json, { ok: true }, label)
     const calls = box.calls("systemctl").map((call) => call.join(" "))
-    assert.ok(calls.includes("--user stop omarchy-airplay.service"), calls.join("; "))
-    assert.equal(box.calls("systemd-run").length, 1, units.join())
+    assert.ok(calls.includes("--user stop omarchy-airplay.service"), label + "; " + calls.join("; "))
+    assert.equal(box.calls("systemd-run").length, 1, label)
   }
 })
 
