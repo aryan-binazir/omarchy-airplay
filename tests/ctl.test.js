@@ -27,7 +27,7 @@ test("a socket nobody answers on is a stopped daemon", (t) => {
   assert.deepEqual(box.ctl(["status"]).json, { installed: true, daemon: false })
 })
 
-test("status merges the daemon's streams, receivers and last error", async (t) => {
+test("status merges the daemon's streams, receivers and last error, and the widget reads them back as rows", async (t) => {
   const box = sandbox(t)
   const stream = { device: "Lounge", device_ip: "10.0.0.9", state: "pin_required", credential_kind: "pin" }
   await box.startDaemon({ state: "pin_required", error: "earlier failure", devices: [TV], streams: [stream] })
@@ -41,8 +41,6 @@ test("status merges the daemon's streams, receivers and last error", async (t) =
     streams: [{ device: "Lounge", device_ip: "10.0.0.9", state: "pin_required", credential_kind: "pin", has_audio: false }]
   })
 
-  // The widget reads this output through Model.js, so a field renamed on one
-  // side and in its own tests still fails here.
   const status = Model.parseStatus(result.stdout)
   assert.deepEqual([status.ok, status.installed, status.daemon, status.error], [true, true, true, "earlier failure"])
   assert.deepEqual(Model.rows(status), [
