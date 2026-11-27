@@ -186,17 +186,39 @@ test("connect starts the service when it is not running", (t) => {
 test("a code typed for a waiting receiver arrives on stdin and completes the connection", async (t) => {
   const box = sandbox(t)
   await box.startDaemon({ streams: [streamTo("10.0.0.9", { state: "pin_required", credential_kind: "pin" })] })
-  assert.deepEqual(box.ctl(["connect", "10.0.0.9", "--credential-stdin"], "6842\n").json, { ok: true })
+  assert.deepEqual(box.ctl(["answer", "10.0.0.9"], "6842\n").json, { ok: true })
   assert.deepEqual(box.calls("requests").filter((request) => request.cmd === "connect"),
     [{ cmd: "connect", target: "10.0.0.9", pin: "6842" }])
   assert.equal(box.daemon().streams[0].state, "streaming")
 })
 
+test("a code from a panel older than the answer command still completes the connection", async (t) => {
+  const box = sandbox(t)
+  await box.startDaemon({ streams: [streamTo("10.0.0.9", { state: "pin_required", credential_kind: "pin" })] })
+  assert.deepEqual(box.ctl(["connect", "10.0.0.9", "--credential-stdin"], "6842\n").json, { ok: true })
+  assert.deepEqual(box.calls("requests").filter((request) => request.cmd === "connect"),
+    [{ cmd: "connect", target: "10.0.0.9", pin: "6842" }])
+})
+
+test("answer refuses a missing, extra or non-literal receiver before reading a code or asking the daemon", async (t) => {
+  const box = sandbox(t)
+  await box.startDaemon({ streams: [streamTo("10.0.0.9", { state: "pin_required", credential_kind: "pin" })] })
+  for (const args of [[], ["10.0.0.9", "60000-60010"], ["tv.local"]]) {
+    const result = box.ctl(["answer", ...args], "6842\n")
+    assert.equal(result.json.ok, false, args.join(" "))
+    assert.equal(result.status, 1, args.join(" "))
+    const waiting = await box.ctlKeepingStdinOpen(["answer", ...args], "")
+    assert.equal(waiting.timedOut, false, args.join(" "))
+    assert.equal(waiting.json.ok, false, args.join(" "))
+  }
+  assert.deepEqual(box.calls("requests"), [])
+})
+
 test("a code for a receiver that is not waiting for one is not sent", async (t) => {
   const box = sandbox(t)
   await box.startDaemon({ streams: [streamTo("10.0.0.9")] })
-  assert.equal(box.ctl(["connect", "10.0.0.9", "--credential-stdin"], "6842\n").json.ok, false)
-  assert.equal(box.ctl(["connect", "10.0.0.7", "--credential-stdin"], "6842\n").json.ok, false)
+  assert.equal(box.ctl(["answer", "10.0.0.9"], "6842\n").json.ok, false)
+  assert.equal(box.ctl(["answer", "10.0.0.7"], "6842\n").json.ok, false)
   assert.deepEqual(box.calls("requests").filter((request) => request.cmd === "connect"), [])
 })
 
@@ -204,7 +226,7 @@ test("an empty or multi-line code is refused", async (t) => {
   const box = sandbox(t)
   await box.startDaemon({ streams: [streamTo("10.0.0.9", { state: "pin_required", credential_kind: "password" })] })
   for (const input of ["", "\n", "p".repeat(200) + "\n", "tab\there\n"]) {
-    assert.equal(box.ctl(["connect", "10.0.0.9", "--credential-stdin"], input).json.ok, false, JSON.stringify(input))
+    assert.equal(box.ctl(["answer", "10.0.0.9"], input).json.ok, false, JSON.stringify(input))
   }
   assert.deepEqual(box.calls("requests").filter((request) => request.cmd === "connect"), [])
 })
@@ -257,7 +279,7 @@ test("down leaves a daemon that does not answer alone", (t) => {
 test("a code is accepted as soon as its line arrives, without waiting for stdin to close", async (t) => {
   const box = sandbox(t)
   await box.startDaemon({ streams: [streamTo("10.0.0.9", { state: "pin_required", credential_kind: "pin" })] })
-  const result = await box.ctlKeepingStdinOpen(["connect", "10.0.0.9", "--credential-stdin"], "6842\n")
+  const result = await box.ctlKeepingStdinOpen(["answer", "10.0.0.9"], "6842\n")
   assert.equal(result.timedOut, false)
   assert.deepEqual(result.json, { ok: true })
 })
