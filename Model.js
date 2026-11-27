@@ -48,7 +48,7 @@ function list(value) {
 }
 
 function parseStatus(text) {
-  var empty = { ok: false, installed: false, daemon: false, state: "idle", error: "", devices: [], streams: [] }
+  var empty = { ok: false, installed: false, daemon: false, error: "", devices: [], streams: [] }
   if (typeof text !== "string" || text.length > MAX_STATUS_BYTES) return empty
 
   var raw
@@ -81,7 +81,6 @@ function parseStatus(text) {
     ok: true,
     installed: raw.installed === true,
     daemon: raw.installed === true && raw.daemon === true,
-    state: STATES.indexOf(raw.state) !== -1 ? raw.state : "idle",
     error: plainText(raw.error, MAX_ERROR),
     devices: devices,
     streams: streams
